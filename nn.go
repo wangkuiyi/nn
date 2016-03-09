@@ -72,7 +72,17 @@ func (n *Network) Register(gate *Gate) *Wire {
 	return &(gate.out)
 }
 
-func (n *Network) sig(ins ...*Wire) *Wire {
+// Sig construct a sigmoid gate.  A gate constructor is a method of
+// Network, which takes some gate input wires, creates the gate as
+// well as its output wire, and returns the wire.  The signature of
+// gate constructors are designed so that it is convenient to
+// construct a network using code like
+/*
+	out := n.Sig(n.Dot(
+		n.Sig(n.Dot(x, y)),
+		n.Sig(n.Dot(x, y))))
+*/
+func (n *Network) Sig(ins ...*Wire) *Wire {
 	gate := &Gate{
 		ins: ins,
 		ps:  nil, // sigmoid gate doesn't have parameters.
@@ -88,7 +98,10 @@ func (n *Network) sig(ins ...*Wire) *Wire {
 	return n.Register(gate)
 }
 
-func (n *Network) dot(ins ...*Wire) *Wire {
+// Dot constructs a dot-product gate, which takes N inputs, ins, and
+// has N+1 parameters, ps.  In the forward pass, Dot gate gives the
+// dot product of vector [ins, 1] and vector ps.
+func (n *Network) Dot(ins ...*Wire) *Wire {
 	gate := &Gate{
 		ins: ins,
 		ps:  randomWires(len(ins) + 1),

@@ -14,7 +14,7 @@ func TestForward(t *testing.T) {
 
 	{
 		n := &Network{}
-		out := n.sig(n.dot(x, y))
+		out := n.Sig(n.Dot(x, y))
 
 		x.value = 1
 		y.value = 2
@@ -24,9 +24,9 @@ func TestForward(t *testing.T) {
 	}
 	{
 		n := &Network{}
-		out := n.sig(n.dot(
-			n.sig(n.dot(x, y)),
-			n.sig(n.dot(x, y))))
+		out := n.Sig(n.Dot(
+			n.Sig(n.Dot(x, y)),
+			n.Sig(n.Dot(x, y))))
 
 		n.Forward()
 
