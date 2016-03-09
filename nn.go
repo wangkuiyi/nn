@@ -1,16 +1,25 @@
 package nn
 
 import (
+	"log"
 	"math"
 	"math/rand"
 
+	"github.com/topicai/candy"
 	"github.com/wangkuiyi/parallel"
 )
 
+// Wire works as inputs to the bottom-layer gates, outputs from the
+// top-layer gates, and connections between gates.
 type Wire struct {
 	value, grad float64
 }
 
+// Gate has one or more inputs, only one outputs, and zero or more
+// parameters -- all of them are Wires.  Specific types of Gates are
+// represented by different forward/backward functions.  Gates are
+// usually created by gate constructors, e.g., Network.Sig and
+// Network.Dot as follows.
 type Gate struct {
 	ins      []*Wire     // Input wires. Refer to output wires owned by previous gates.
 	ps       []Wire      // Parameters. Owned by the gate.
@@ -19,15 +28,15 @@ type Gate struct {
 	backward func(*Gate) // Should accumulate to ins.grad and ps.grad.
 }
 
+// Network describes a NN.
 type Network struct {
 	wireLayer map[*Wire]int // Map from *Wire to wire layer.  Used to infer gate layers.
 	layers    [][]*Gate     // Layers of gates.
-	outs      []*Wire       // Collected by Network.Outputs.
 }
 
-// Network.Register is supposed to be called by gate constructors,
-// which should return &(gate.out).  We make Network.Register returns
-// &(gate.out), so that its caller can simply return its return value.
+// Register is supposed to be called by gate constructors, which
+// should return &(gate.out).  We make Register returns &(gate.out),
+// so that its caller can simply return its return value.
 func (n *Network) Register(gate *Gate) *Wire {
 	if n.wireLayer == nil {
 		n.wireLayer = make(map[*Wire]int)
@@ -61,21 +70,6 @@ func (n *Network) Register(gate *Gate) *Wire {
 	n.layers[gateLayer] = append(n.layers[gateLayer], gate)
 
 	return &(gate.out)
-}
-
-// Network.InferOutputs is supposed to be called after the
-// construction of the network, which calls Network.Register to
-// register wires and gates into Network.wireLayers and
-// Network.layers, which in turn can be used by Network.InferOutputs
-// to infer network output wires.
-func (n *Network) InferOutputs() {
-	n.outs = nil
-	topWireLayer := len(n.layers)
-	for k, v := range n.wireLayer {
-		if v == topWireLayer {
-			n.outs = append(n.outs, k)
-		}
-	}
 }
 
 func (n *Network) sig(ins ...*Wire) *Wire {
@@ -137,35 +131,21 @@ func sig(x float64) float64 {
 	return 1.0 / (1.0 + math.Exp(-x))
 }
 
-func (n *Network) Forward() []*Wire {
+// Forward runs a constructed network, and preset values in network input
+// wires,
+func (n *Network) Forward() {
+	if !n.constructed() {
+		log.Panic("Cannot run an emtpy Network")
+	}
+
 	for l := range n.layers {
-		parallel.For(0, len(n.layers[l]), 1, func(g int) {
+		candy.Must(parallel.For(0, len(n.layers[l]), 1, func(g int) {
 			gate := n.layers[l][g]
 			gate.forward(gate)
-		})
+		}))
 	}
-	return n.outs
 }
 
-type Example struct {
-	*Network
-	x, y, out *Wire
-}
-
-func NewExample() *Example {
-	n := &Example{
-		Network: &Network{}, //TODO(y): Call NetNetwork
-		x:       &Wire{},
-		y:       &Wire{},
-		out:     nil,
-	}
-	n.out = n.sig(n.dot(n.x, n.y))
-	n.InferOutputs()
-	return n
-}
-
-func (n *Example) Run() {
-	n.x.value = 1
-	n.y.value = 2
-	n.Forward()
+func (n *Network) constructed() bool {
+	return len(n.layers) > 0
 }
