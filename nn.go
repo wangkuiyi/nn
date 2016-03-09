@@ -3,6 +3,8 @@ package nn
 import (
 	"math"
 	"math/rand"
+
+	"github.com/wangkuiyi/parallel"
 )
 
 type Wire struct {
@@ -20,12 +22,13 @@ type Gate struct {
 type Network struct {
 	wireLayer map[*Wire]int // Map from *Wire to wire layer.  Used to infer gate layers.
 	layers    [][]*Gate     // Layers of gates.
+	outs      []*Wire       // Collected by Network.Outputs.
 }
 
-// Network.register is supposed to be called by gate constructors,
-// which should return &(gate.out).  We make Network.register returns
+// Network.Register is supposed to be called by gate constructors,
+// which should return &(gate.out).  We make Network.Register returns
 // &(gate.out), so that its caller can simply return its return value.
-func (n *Network) register(gate *Gate) *Wire {
+func (n *Network) Register(gate *Gate) *Wire {
 	if n.wireLayer == nil {
 		n.wireLayer = make(map[*Wire]int)
 	}
@@ -60,6 +63,21 @@ func (n *Network) register(gate *Gate) *Wire {
 	return &(gate.out)
 }
 
+// Network.InferOutputs is supposed to be called after the
+// construction of the network, which calls Network.Register to
+// register wires and gates into Network.wireLayers and
+// Network.layers, which in turn can be used by Network.InferOutputs
+// to infer network output wires.
+func (n *Network) InferOutputs() {
+	n.outs = nil
+	topWireLayer := len(n.layers)
+	for k, v := range n.wireLayer {
+		if v == topWireLayer {
+			n.outs = append(n.outs, k)
+		}
+	}
+}
+
 func (n *Network) sig(ins ...*Wire) *Wire {
 	gate := &Gate{
 		ins: ins,
@@ -73,7 +91,7 @@ func (n *Network) sig(ins ...*Wire) *Wire {
 			gate.ins[0].grad += (s * (1 - s)) * gate.out.grad
 		},
 	}
-	return n.register(gate)
+	return n.Register(gate)
 }
 
 func (n *Network) dot(ins ...*Wire) *Wire {
@@ -96,19 +114,37 @@ func (n *Network) dot(ins ...*Wire) *Wire {
 			gate.ps[len(gate.ins)].grad += gate.out.grad
 		},
 	}
-	return n.register(gate)
+	return n.Register(gate)
 }
+
+var (
+	deterministic bool // Unit test and other debug-purposed code should set this to true.
+)
 
 func randomWires(n int) []Wire {
 	r := make([]Wire, n)
 	for i := range r {
-		r[i].value = rand.Float64()
+		if deterministic {
+			r[i].value = 1.0
+		} else {
+			r[i].value = rand.Float64()
+		}
 	}
 	return r
 }
 
 func sig(x float64) float64 {
 	return 1.0 / (1.0 + math.Exp(-x))
+}
+
+func (n *Network) Forward() []*Wire {
+	for l := range n.layers {
+		parallel.For(0, len(n.layers[l]), 1, func(g int) {
+			gate := n.layers[l][g]
+			gate.forward(gate)
+		})
+	}
+	return n.outs
 }
 
 type Example struct {
@@ -124,5 +160,12 @@ func NewExample() *Example {
 		out:     nil,
 	}
 	n.out = n.sig(n.dot(n.x, n.y))
+	n.InferOutputs()
 	return n
+}
+
+func (n *Example) Run() {
+	n.x.value = 1
+	n.y.value = 2
+	n.Forward()
 }
