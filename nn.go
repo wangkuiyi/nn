@@ -1,4 +1,4 @@
-package main
+package nn
 
 import (
 	"math"
@@ -10,16 +10,54 @@ type Wire struct {
 }
 
 type Gate struct {
-	ins      []*Wire // Input wires.
-	ps       []Wire  // Parameters.
-	out      Wire
-	forward  func(*Gate) // Write to out.value.
-	backward func(*Gate) // Accumulate to ins.grad and ps.grad.
+	ins      []*Wire     // Input wires. Refer to output wires owned by previous gates.
+	ps       []Wire      // Parameters. Owned by the gate.
+	out      Wire        // The output. Owned by the gate.
+	forward  func(*Gate) // Should write to out.value.
+	backward func(*Gate) // Should accumulate to ins.grad and ps.grad.
 }
 
 type Network struct {
-	wireLayer map[*Wire]int // Map from *Wire to wire layer.
+	wireLayer map[*Wire]int // Map from *Wire to wire layer.  Used to infer gate layers.
 	layers    [][]*Gate     // Layers of gates.
+}
+
+// Network.register is supposed to be called by gate constructors,
+// which should return &(gate.out).  We make Network.register returns
+// &(gate.out), so that its caller can simply return its return value.
+func (n *Network) register(gate *Gate) *Wire {
+	if n.wireLayer == nil {
+		n.wireLayer = make(map[*Wire]int)
+	}
+
+	// Find the up-most layer of gate inputs as the gate's layer.
+	gateLayer := 0
+	for _, in := range gate.ins {
+		if _, ok := n.wireLayer[in]; !ok {
+			// We assume that Go evaluates nested calls of
+			// gate constructors in the bottom-first
+			// order.  So if a gate input wire is not yet
+			// registered, it must be a network input.
+			n.wireLayer[in] = 0
+		}
+
+		l := n.wireLayer[in]
+		if l > gateLayer {
+			gateLayer = l
+		}
+	}
+
+	// Register gate output wire in layer of gate layer + 1, so
+	// upper layer gates can use this to infer their layer.
+	n.wireLayer[&(gate.out)] = gateLayer + 1
+
+	// Register gate's layer.
+	if len(n.layers) < gateLayer+1 {
+		n.layers = append(n.layers, make([]*Gate, 0))
+	}
+	n.layers[gateLayer] = append(n.layers[gateLayer], gate)
+
+	return &(gate.out)
 }
 
 func (n *Network) sig(ins ...*Wire) *Wire {
@@ -73,12 +111,6 @@ func sig(x float64) float64 {
 	return 1.0 / (1.0 + math.Exp(-x))
 }
 
-// register returns gate.out
-func (n *Network) register(gate *Gate) *Wire {
-	// TODO(y): register here.
-	return &(gate.out)
-}
-
 type Example struct {
 	*Network
 	x, y, out *Wire
@@ -91,10 +123,6 @@ func NewExample() *Example {
 		y:       &Wire{},
 		out:     nil,
 	}
-	n.out = n.sig(n.dot(
-		n.sig(n.dot(n.x, n.y)),
-		n.sig(n.dot(n.x, n.y))))
+	n.out = n.sig(n.dot(n.x, n.y))
 	return n
 }
-
-func main() {}
